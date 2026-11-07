@@ -1,0 +1,208 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Link OSNR Calculator</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: one instrument panel — readout on top, four input rows, per-span trace below */
+:root {
+  --bg: #0b0f14;
+  --panel: #121820;
+  --line: #222c38;
+  --fg: #e3e9ef;
+  --muted: #7d8a99;
+  --accent: #5ec8e5;
+  --good: #6fd39a;
+  --warn: #e8c45a;
+  --bad: #ef7a6a;
+  --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--fg); font-family: var(--sans);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 32px 48px;
+}
+main { max-width: 720px; margin: 0 auto; display: grid; gap: 24px; }
+header { display: grid; gap: 4px; }
+h1 { font-size: 1.15rem; font-weight: 600; margin: 0; letter-spacing: .01em; }
+.sub { color: var(--muted); font-size: .85rem; margin: 0; }
+
+.readout {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  padding: 24px; display: grid; gap: 10px;
+}
+.label { font-family: var(--mono); font-size: .72rem; text-transform: uppercase; letter-spacing: .12em; color: var(--muted); }
+.big { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+#osnr {
+  font-family: var(--mono); font-weight: 600; font-variant-numeric: tabular-nums;
+  font-size: clamp(3.6rem, 16vw, 6.5rem); line-height: 1; color: var(--accent);
+  transition: color .2s;
+}
+.unit { font-family: var(--mono); font-size: 1.3rem; color: var(--muted); }
+.chip {
+  font-family: var(--mono); font-size: .72rem; letter-spacing: .08em; text-transform: uppercase;
+  padding: 3px 9px; border-radius: 99px; border: 1px solid currentColor; margin-left: auto;
+}
+.formula {
+  font-family: var(--mono); font-size: .82rem; color: var(--muted); font-variant-numeric: tabular-nums;
+  overflow-x: auto; white-space: nowrap; padding-top: 8px; border-top: 1px solid var(--line);
+}
+.formula b { color: var(--fg); font-weight: 500; }
+
+.inputs { display: grid; gap: 4px; }
+.row {
+  display: grid; grid-template-columns: minmax(0, 1fr) 7.5rem; gap: 8px 16px; align-items: center;
+  padding: 14px 0; border-bottom: 1px solid var(--line);
+}
+.row label { font-size: .95rem; }
+.row label span { color: var(--muted); font-family: var(--mono); font-size: .8rem; margin-left: 6px; }
+.row input[type=range] { grid-column: 1 / -1; width: 100%; accent-color: var(--accent); }
+.num { display: flex; align-items: center; gap: 6px; justify-self: end; }
+.num input {
+  width: 5.5rem; background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 6px;
+  padding: 6px 8px; font-family: var(--mono); font-size: .95rem; text-align: right; font-variant-numeric: tabular-nums;
+}
+.num input:focus-visible, input[type=range]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.num small { font-family: var(--mono); color: var(--muted); font-size: .75rem; width: 1.6rem; }
+
+.trace { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px 16px 8px; display: grid; gap: 8px; }
+.trace svg { width: 100%; height: auto; display: block; }
+.trace text { font-family: var(--mono); font-size: 10px; fill: var(--muted); }
+
+.notes { color: var(--muted); font-size: .82rem; line-height: 1.55; max-width: 65ch; margin: 0; }
+.notes code { font-family: var(--mono); color: var(--fg); }
+@media (prefers-reduced-motion: reduce) { #osnr { transition: none; } }
+</style>
+
+<main>
+  <header>
+    <h1>Link OSNR Calculator</h1>
+    <p class="sub">Identical amplified spans, ASE-limited, 0.1 nm reference bandwidth at 1550 nm</p>
+  </header>
+
+  <section class="readout" aria-live="polite">
+    <div class="big">
+      <div class="label">End-of-link OSNR</div>
+      <span class="chip" id="chip"></span>
+    </div>
+    <div class="big"><span id="osnr">–</span><span class="unit">dB</span></div>
+    <div class="formula" id="formula"></div>
+  </section>
+
+  <section class="inputs">
+    <div class="row">
+      <label for="p-n">Launch power per channel <span>dBm</span></label>
+      <div class="num"><input id="p-n" type="number" step="0.1" min="-10" max="10" value="1"><small>dBm</small></div>
+      <input id="p-r" type="range" step="0.1" min="-10" max="10" value="1" aria-label="Launch power per channel">
+    </div>
+    <div class="row">
+      <label for="l-n">Span loss <span>dB</span></label>
+      <div class="num"><input id="l-n" type="number" step="0.1" min="5" max="35" value="22"><small>dB</small></div>
+      <input id="l-r" type="range" step="0.1" min="5" max="35" value="22" aria-label="Span loss">
+    </div>
+    <div class="row">
+      <label for="nf-n">Amplifier noise figure <span>dB</span></label>
+      <div class="num"><input id="nf-n" type="number" step="0.1" min="3" max="10" value="5.5"><small>dB</small></div>
+      <input id="nf-r" type="range" step="0.1" min="3" max="10" value="5.5" aria-label="Amplifier noise figure">
+    </div>
+    <div class="row">
+      <label for="n-n">Number of spans</label>
+      <div class="num"><input id="n-n" type="number" step="1" min="1" max="40" value="10"><small></small></div>
+      <input id="n-r" type="range" step="1" min="1" max="40" value="10" aria-label="Number of spans">
+    </div>
+  </section>
+
+  <section class="trace">
+    <div class="label">OSNR after each span</div>
+    <svg id="chart" viewBox="0 0 640 180" role="img" aria-label="OSNR versus span count"></svg>
+  </section>
+
+  <p class="notes">
+    <code>OSNR = 58 + P<sub>ch</sub> − L<sub>span</sub> − NF − 10·log<sub>10</sub>(N)</code>.
+    The 58 dB constant is −10·log<sub>10</sub>(hν·Δν) in dBm with ν ≈ 193.4 THz and Δν = 12.5 GHz (0.1 nm).
+    Assumes every amplifier exactly compensates its span loss and the gain ≫ 1. Fibre nonlinearity, pre-amp/booster
+    differences and transponder back-to-back OSNR are not included.
+  </p>
+</main>
+
+<script>
+const fields = [["p", 1], ["l", 22], ["nf", 5.5], ["n", 10]];
+const $ = id => document.getElementById(id);
+const fmt = (v, d = 1) => (v >= 0 ? "" : "−") + Math.abs(v).toFixed(d);
+
+function clamp(el, v) {
+  const lo = +el.min, hi = +el.max;
+  return Math.min(hi, Math.max(lo, v));
+}
+
+function osnr(P, L, NF, N) { return 58 + P - L - NF - 10 * Math.log10(N); }
+
+function render() {
+  const P = +$("p-r").value, L = +$("l-r").value, NF = +$("nf-r").value, N = Math.round(+$("n-r").value);
+  const o = osnr(P, L, NF, N);
+  const el = $("osnr");
+  el.textContent = fmt(o);
+
+  let color = "var(--good)", text = "Comfortable";
+  if (o < 12) { color = "var(--bad)"; text = "Below 12 dB"; }
+  else if (o < 18) { color = "var(--warn)"; text = "Tight for coherent"; }
+  el.style.color = color;
+  $("chip").style.color = color;
+  $("chip").textContent = text;
+
+  $("formula").innerHTML =
+    `58 <b>+ ${fmt(P)}</b> − <b>${L.toFixed(1)}</b> − <b>${NF.toFixed(1)}</b> − <b>${(10 * Math.log10(N)).toFixed(2)}</b>` +
+    ` <span style="opacity:.6">(10·log N, N=${N})</span> = <b>${fmt(o, 2)} dB</b>`;
+
+  drawChart(P, L, NF, N);
+}
+
+function drawChart(P, L, NF, N) {
+  const W = 640, H = 180, ml = 36, mr = 12, mt = 12, mb = 26;
+  const pts = [];
+  for (let k = 1; k <= N; k++) pts.push([k, osnr(P, L, NF, k)]);
+  const ys = pts.map(p => p[1]);
+  let yMax = Math.ceil(Math.max(...ys) / 5) * 5, yMin = Math.floor(Math.min(...ys) / 5) * 5;
+  if (yMax === yMin) { yMax += 5; yMin -= 5; }
+  const x = k => N === 1 ? ml + (W - ml - mr) / 2 : ml + (k - 1) / (N - 1) * (W - ml - mr);
+  const y = v => mt + (yMax - v) / (yMax - yMin) * (H - mt - mb);
+
+  let s = "";
+  for (let v = yMin; v <= yMax; v += 5) {
+    s += `<line x1="${ml}" x2="${W - mr}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)" stroke-width="1"/>`;
+    s += `<text x="${ml - 6}" y="${y(v) + 3}" text-anchor="end">${v}</text>`;
+  }
+  const step = N <= 12 ? 1 : N <= 24 ? 2 : 5;
+  for (let k = 1; k <= N; k++) {
+    if (k === 1 || k === N || k % step === 0)
+      s += `<text x="${x(k)}" y="${H - 8}" text-anchor="middle">${k}</text>`;
+  }
+  const path = pts.map((p, i) => (i ? "L" : "M") + x(p[0]).toFixed(1) + "," + y(p[1]).toFixed(1)).join("");
+  const area = path + `L${x(N).toFixed(1)},${H - mb}L${x(1).toFixed(1)},${H - mb}Z`;
+  s += `<path d="${area}" fill="var(--accent)" fill-opacity=".08" stroke="none"/>`;
+  s += `<path d="${path}" fill="none" stroke="var(--accent)" stroke-width="2"/>`;
+  pts.forEach(p => s += `<circle cx="${x(p[0])}" cy="${y(p[1])}" r="${p[0] === N ? 4.5 : 2}" fill="${p[0] === N ? "var(--fg)" : "var(--accent)"}"/>`);
+  $("chart").innerHTML = s;
+}
+
+fields.forEach(([k]) => {
+  const r = $(k + "-r"), n = $(k + "-n");
+  r.addEventListener("input", () => { n.value = r.value; render(); });
+  n.addEventListener("input", () => {
+    if (n.value === "" || isNaN(+n.value)) return;
+    r.value = clamp(r, +n.value); render();
+  });
+  n.addEventListener("change", () => {
+    let v = isNaN(+n.value) || n.value === "" ? +r.value : clamp(n, +n.value);
+    if (k === "n") v = Math.round(v);
+    n.value = v; r.value = v; render();
+  });
+});
+render();
+</script>
+
+</body></html>
